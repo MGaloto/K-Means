@@ -1,0 +1,517 @@
+---
+title: "Analisis de Clusters"
+subtitle: "Trabajo sobre Clasificacion mediante K-Means"
+author: "Maximiliano Galoto"
+output:
+ prettydoc::html_pretty:
+    theme: lumen
+    highlight: github
+    toc: true
+    toc_depth: 2
+    math: katex
+
+
+
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(rgl)
+
+rgl::setupKnitr(autoprint = TRUE)
+
+```
+
+
+# Introducción
+
+K-medias es un método de agrupamiento, que tiene como objetivo la partición de un conjunto de n observaciones en k grupos en el que cada observación pertenece al grupo cuyo valor medio es más cercano. Es un método utilizado en minería de datos.
+
+La agrupación de distintos objetos en clusters nos sirve para encontrar características homogéneas de una muestra o población. En este trabajo voy a implementar algoritmos de K-Means, donde previamente vamos a visualizar mediante un análisis de componentes principàles los outliers, luego una matriz de diferencias para ver la distancia o cercanía que hay entre nuestras observaciones, que serán empleados de una compañía, donde las características a analizar son todas cuantitativas, las faltas totales, las licencias por enfermedad y las horas extra todas en el periodo de un año.
+
+
+# Desarrollo
+
+
+## Analisis de Componentes Principales
+
+
+_Mediante el análisis de componentes principales podemos reducir la dimensionalidad a 2._
+
+
+
+```{r, include=FALSE}
+
+library(rapportools)
+library(shiny)
+library(DT)
+library(tidyverse)
+library(tidytext)
+library(wordcloud2)
+library(ggplot2)
+library(ggthemes)
+library(viridisLite)
+library(dplyr)
+library(plotly)
+library(quantmod)
+library(highcharter)
+library(tidyverse)
+library(miscset)
+library(ggplot2)
+library(corrplot) 
+library(GGally)
+library(readr)  
+library(dplyr)  
+library(crayon) 
+library(modeest)
+library(readxl)
+library(ggthemes)
+library(reshape)
+library(scales)
+library(gganimate)
+theme_set(theme_bw())
+library(gapminder)
+library(gifski)
+library(factoextra)
+library(NbClust)
+library(cluster)
+library(fpc)
+library(dendextend)
+
+
+
+df = read_excel('df_rrhh.xlsx')
+
+
+
+df_matrix = df %>% group_by(emple) %>% summarise(faltas = sum(total_faltas),
+                                                      hs_extra_al_100 = sum(hs_extra_100),
+                                                      hs_extra_al_50 = sum(hs_extra_50),
+                                                      enfermedad = sum(licencia_enfermedad))
+
+
+rownames(df_matrix) = df_matrix$emple
+
+
+
+#normalizar las puntuaciones
+
+
+df_matrix_scale <- scale(df_matrix[,2:5])
+
+rownames(df_matrix_scale) = df_matrix$emple
+
+
+
+matrix_distancia = fviz_dist(get_dist(df_matrix_scale, method = "euclidean") , gradient = list(low = "red", mid = "white", high = "blue")) + 
+  labs(title = 'Matriz de Distancia por Empleado', subtitle = "Azul = Menor Relacion, Rojo = Mayor Relacion",
+    caption = "Matriz escalada de faltas y horas extra por empleados")
+  theme_light()
+  
+  
+
+```
+
+
+```{r, fig.dim = c(10, 8)}
+
+
+
+p1 = princomp(df_matrix_scale)
+fviz_pca_ind(p1) + 
+  labs(title = 'Matriz de Distancia por Empleado', subtitle = "Datos con outliers",
+    caption = "Elaboracion propia en base a datos biometricos de una empresa.")
+
+
+
+
+
+
+```
+
+
+
+
+
+_PCA sin Outliers_
+
+
+```{r, include=FALSE, fig.dim = c(10, 8)}
+
+set.seed(123)
+
+df_matrix = df %>% group_by(emple) %>% filter(emple != 'Empleado 4',
+                                              emple != 'Empleado 25',
+                                              emple != 'Empleado 26',
+                                              emple != 'Empleado 53',
+                                              emple != 'Empleado 41') %>%  summarise(faltas = sum(total_faltas),
+                                                      hs_extra_al_100 = sum(hs_extra_100),
+                                                      hs_extra_al_50 = sum(hs_extra_50),
+                                                      enfermedad = sum(licencia_enfermedad))
+
+
+
+
+
+df_matrix_scale <- scale(df_matrix[,2:5])
+
+rownames(df_matrix_scale) = df_matrix$emple
+
+
+
+matrix_distancia = fviz_dist(get_dist(df_matrix_scale, method = "euclidean") , gradient = list(low = "red", mid = "white", high = "blue")) + 
+  labs(title = 'Matriz de Distancia por Empleado', subtitle = "Azul = Menor Relacion, Rojo = Mayor Relacion",
+    caption = "Matriz escalada de faltas y horas extra por empleados")
+  theme_light()
+  
+  
+
+```
+
+
+
+```{r, fig.dim = c(10, 8)}
+
+
+
+
+
+
+p1 = princomp(df_matrix_scale)
+fviz_pca_ind(p1) + 
+  labs(title = 'Matriz de Distancia por Empleado', subtitle = "Datos sin outliers",
+    caption = "Elaboracion propia en base a datos biometricos de una empresa.")
+
+
+
+
+
+```
+
+
+## Matriz de distancia
+
+_La matriz de diferencias nos sirve para ver cuan homogéneos o heterogéneos son dos empleados dadas ciertas variables numéricas que tienen cada uno, en este caso elegimos 4: Total de Faltas anuales, Total de Faltas por Enfermedad, Horas extra al 50 y al 100_
+_Se utilizaron los datos escalados. En color rojo mayor relación entre empleados, en color azul menor relación_
+
+
+
+```{r, fig.dim = c(10, 8)}
+
+set.seed(123)
+
+ggplotly(matrix_distancia)
+
+
+
+
+```
+
+
+
+
+
+## Grafico 3D para ver Clusters
+
+_De dos dimensiones pasamos a 3 para visualizar mejor las observaciones y poder ver apriori si existen clusters._
+
+```{r, warning=FALSE, fig.dim = c(10, 8)}
+
+
+
+plot3d(p1$scores, size = 1.5, type="s")
+
+
+
+
+
+
+```
+
+
+# K-Means
+
+_Comenzamos a probar la cantidad de clusters de forma visual utilizando kmenasruns, una función de R, donde indicamos la cantidad de clusters que deseamos ver:_
+
+
+## Clusters
+
+_Usamos 2 Clusters_
+
+
+```{r, fig.dim = c(10, 8)}
+
+set.seed(123)
+
+k2 = kmeansruns(df_matrix_scale, krange = 2, runs = 100) # 2 clusters de 100 iteraciones
+fviz_cluster(k2, data = df_matrix_scale,) + ggtitle('2 Clusters') 
+
+
+
+```
+
+
+_Usamos 3 Clusters_
+
+
+
+```{r, fig.dim = c(10, 8)}
+
+set.seed(123)
+
+k3 = kmeansruns(df_matrix_scale, krange = 3, runs = 100) # 3 clusters de 100 iteraciones
+fviz_cluster(k3, data = df_matrix_scale) + ggtitle('3 Clusters') 
+
+df_matrix$clusters = k3$cluster
+
+
+df_matrix$clusters = as.numeric(df_matrix$clusters)
+
+
+
+
+g2 <- fviz_cluster(object = k3, data = df_matrix_scale,
+                   ellipse.type = "norm", geom = "point", main = "3 Clusters",
+                   stand = FALSE, palette = "jco") +
+      theme_bw() 
+ggplotly(g2)
+
+
+
+
+```
+
+_Usamos 4 Clusters_
+
+
+```{r, fig.dim = c(10, 8)}
+
+set.seed(123)
+
+k4 = kmeansruns(df_matrix_scale, krange = 4, runs = 100) # 3 clusters de 100 iteraciones
+fviz_cluster(k4, data = df_matrix_scale)+ ggtitle('4 Clusters') 
+
+
+```
+
+
+_Usamos 5 Clusters_
+
+
+```{r, fig.dim = c(10, 8)}
+
+set.seed(123)
+
+k5 = kmeansruns(df_matrix_scale, krange = 5, runs = 100) # 3 clusters de 100 iteraciones
+fviz_cluster(k5, data = df_matrix_scale) + ggtitle('5 Clusters') 
+
+
+
+```
+
+
+
+## Clusters Optimos
+
+_Elegimos el optimo cluster en base al método de silueta, codo y gap statistic._
+
+_Son tres pruebas que nos ayudan a elegir la mejor cantidad de clusters posibles._
+
+
+```{r, fig.dim = c(10, 8)}
+# metodo del codo
+
+set.seed(123)
+
+fviz_nbclust(df_matrix_scale, kmeans, method = 'wss') +
+  labs(subtitle = 'elbow method')
+
+# metodo de la silueta
+
+fviz_nbclust(df_matrix_scale, kmeans, method = 'silhouette') +
+  labs(subtitle = 'silhouette method') # nos da 3
+
+# metodo gap statistic
+
+
+set.seed(123)
+fviz_nbclust(df_matrix_scale, kmeans, nstart = 25, method = 'gap_stat', nboot = 50) + 
+  labs(subtitle = 'gap statistic method')
+
+
+
+
+```
+
+
+
+
+## Grafico 3D para ver si hay clusters.
+
+_Utilizamos 3 Clusters ya que por el método de la silueta nos dio la cantidad optima de clusters a utilizar, en este gráfico podemos observar la division de clusters por color, donde cada punto es un empleado._
+
+
+
+
+```{r,warning=FALSE, fig.dim = c(10, 8)}
+
+
+plot3d(p1$scores, col = k3$cluster, size = 3, type = 's')
+
+
+
+
+```
+
+
+
+
+
+
+## Funcion NBClust 
+
+_En las conclusiones podemos observar por regla de la mayoría la cantidad optima de clusters es 3. Coincide con el método de la silueta_
+
+```{r, warning=FALSE, fig.dim = c(10, 8)}
+
+
+
+set.seed(123)
+
+res.nbclust = NbClust(df_matrix_scale, distance = 'euclidean', min.nc = 2, max.nc = 9,
+                      method = 'complete', index = 'all')
+factoextra::fviz_nbclust(res.nbclust) + 
+  theme_minimal() +
+  ggtitle('NBClust numero optimo de clusters') +
+  theme_classic()
+
+
+
+
+```
+
+
+## Hacemos un clusterboot para evaluar el metodo de Jaccard 
+
+
+_Para 3 clusters el coeficiente de Jaccard es estable ya que el punto de corte es 0.70_
+
+```{r, include=FALSE, fig.dim = c(10, 8)}
+
+jk = clusterboot(df_matrix_scale, B=100, bootmethod = c('jitter', 'boot'),
+                 clustermethod = kmeansCBI, krange = 3, seed = 123)
+
+```
+
+
+
+
+_Resumen:_
+
+```{r, fig.dim = c(10, 8)}
+
+cat('Por el metodo de ',jk$clustermethod, 'el coeficiente de Jaccard es de: ',jk$bootmean )
+
+
+```
+
+
+
+
+# Conclusiones
+
+
+
+
+## Boxpot para observar los clusters
+
+
+_Podemos observar que con 3 clusters hay heterogeneidad entre cada uno._
+_Basado en el coeficiente de Jaccard y en el método de la silueta elegimos 3 clusters._
+_Por ultimo, graficamos un diagrama de caja para cada variable numérica por cluster, para así poder visualizar las diferencias entre los mismos por variable._
+
+
+
+```{r,  warning=FALSE, include=FALSE, fig.dim = c(10, 8)}
+
+library(viridisLite)
+library(hrbrthemes)
+library(viridis)
+
+set.seed(123)
+
+
+boxfaltas = df_matrix %>% 
+ggplot(aes(x=as.factor(clusters), y= faltas, fill = as.factor(clusters))) +
+  geom_boxplot() + geom_point() +
+  xlab('Clusters') + ylab('Clusters') + ggtitle('Faltas')
+
+
+
+boxhs50 = df_matrix %>% 
+ggplot(aes(x=factor(clusters), y= hs_extra_al_50, fill = factor(clusters))) +
+  geom_boxplot() + geom_point()+
+  xlab('Clusters') + ylab('Clusters') + ggtitle('Hs 50')
+
+
+boxhs100 = df_matrix %>% 
+ggplot(aes(x=factor(clusters), y= hs_extra_al_100, fill = factor(clusters))) +
+  geom_boxplot() + geom_point()+
+  xlab('Clusters') + ylab('Clusters') + ggtitle('Hs 100')
+
+boxhslic = df_matrix %>% 
+ggplot(aes(x=factor(clusters), y= enfermedad, fill = factor(clusters))) +
+  geom_boxplot() + geom_point()+
+  xlab('Clusters') + ylab('Clusters') + ggtitle('Lic Enfermedad')
+```
+
+
+```{r, fig.dim = c(10, 8), warning=FALSE}
+
+
+set.seed(123)
+
+ggplotly(boxfaltas)
+
+
+
+
+ggplotly(boxhs50)
+
+
+ggplotly(boxhs100)
+
+
+ggplotly(boxhslic)
+
+```
+
+
+```{r,  warning=FALSE, include=FALSE, fig.dim = c(10, 8)}
+
+colnames(df_matrix)[1] = 'Empleados' 
+colnames(df_matrix)[6] = 'Clusters' 
+
+df_matrix %>% select(Empleados, Clusters)
+
+```
+
+
+_Observamos que el cluster 3 es el que tiene valores mas bajos para todas las variables numéricas_
+
+_Este es un método muy útil para clasificar observaciones en grupos_
+
+
+
+Table: **Clusters K-Means**
+
+ **Características Homogeneas por Grupo**     |  
+---------------------------------| --------------------------------------------|--------------------------------------------|--------------------------------------------|--------------------------------------------|
+Valores posibles       | Faltas | Hs Extra 50| Hs Extra 100| Enfermedad
+*Cluster 1*|*Medias* |*Altas* |*Altas* |*Medias* 
+*Cluster 2*|*Altas*|*Bajas*|*Medias*|*Altas*
+*Cluster 3*|*Bajas*|*Bajas*|*Bajas*|*Bajas*
+
+
